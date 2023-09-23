@@ -19,6 +19,8 @@ class AlertHub:
                 # telegram
                 "telegram_bot_token": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
                 "telegram_chat_id": os.environ.get("TELEGRAM_CHAT_ID", ""),
+                # proxy
+                "socks_proxy": os.environ.get("SOCKS_PROXY", ""),
             }
         else:
             self.config = config
@@ -29,6 +31,9 @@ class AlertHub:
         )
         self.session.mount("http://", a)
         self.session.mount("https://", a)
+        if self.config['socks_proxy']:
+            self.session.proxies = {'http': self.config['socks_proxy'],
+                                    'https': self.config['socks_proxy']}
 
     def send_bark(
         self,
