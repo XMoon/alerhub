@@ -73,7 +73,7 @@ class AlertHub:
             text += f"[{group or 'UNKNOWN'}] {title}\n"
         text += body
         if url:
-            text += f"URL: [{url}]({url})"
+            text += f"URL:{url}"
         data = {
             "text": text,
             "chat_id": self.config["telegram_chat_id"],

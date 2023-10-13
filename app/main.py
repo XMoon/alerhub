@@ -1,8 +1,8 @@
 import logging
 from uvicorn.logging import DefaultFormatter
-from typing import Optional, Any
+from typing import List, Dict, Any, Optional
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -14,6 +14,26 @@ alerthub = AlertHub()
 
 
 class Alert(BaseModel):
+    status: str
+    labels: Dict[str, Any]
+    annotations: Dict[str, Any]
+    startsAt: str
+    endsAt: str
+    generatorURL: str
+
+class AlertGroup(BaseModel):
+    version: str
+    groupKey: str
+    truncatedAlerts: int
+    status: str
+    receiver: str
+    groupLabels: Dict[str, Any]
+    commonLabels: Dict[str, Any]
+    commonAnnotations: Dict[str, Any]
+    externalURL: str
+    alerts: List[Alert]
+
+class CustomAlert(BaseModel):
     body: str
     title: Optional[str] = None
     level: Optional[str] = None
@@ -42,5 +62,44 @@ async def startup_event():
     logger.addHandler(handler)
 
 @app.post("/alert")
-async def alert(alert: Alert) -> Any:
+def alert(request: Request, alert: CustomAlert) -> Any:
     return alerthub.send(**alert.model_dump())
+
+@app.post("/alertmanager-webhook")
+def alertmanager_webhook(request: Request, alert_group: AlertGroup) -> Dict[str, str]:
+    try:
+        firing_alerts = [alert for alert in alert_group.alerts if alert.status == "firing"]
+        resolved_alerts = [alert for alert in alert_group.alerts if alert.status == "resolved"]
+        # title
+        if alert_group.status == "firing":
+            title =  f"[{alert_group.status.upper()}: {len(firing_alerts)}]"
+        else:
+            title =  f"[{alert_group.status.upper()}]"
+        for grouplable in alert_group.groupLabels:
+            title += " " + grouplable + ":" + alert_group.groupLabels[grouplable]
+        # url 
+        url = f"{alert_group.externalURL}/#/alerts?receiver=f{alert_group.receiver}"
+        # alerts
+        alert_msg = ""
+        for alert in firing_alerts:
+            alert_msg += "**Alerts Firing**\n"
+            alert_msg += f"#### [{alert.labels['severity'].upper()}] { alert.annotations['summary'] }\n"
+            alert_msg += f"**Description:**  {alert.annotations['description']}\n"
+            alert_msg += f"**Graph:**  {alert.generatorURL}\n"
+            alert_msg += f"**Details:**\n"
+            for label in alert.labels:
+                if label not in ['severity', 'summary']:
+                    alert_msg += f"  - {label}: {alert.labels[label]}\n"
+        for alert in resolved_alerts:
+            alert_msg += "**Alerts Resolved**\n"
+            alert_msg += f"#### [{alert.labels['severity'].upper()}] { alert.annotations['summary'] }\n"
+            alert_msg += f"**Description:**  {alert.annotations['description']}\n"
+            alert_msg += f"**Graph:**  {alert.generatorURL}\n"
+            alert_msg += f"**Details:**\n"
+            for label in alert.labels:
+                if label not in ['severity', 'summary']:
+                    alert_msg += f"  - {label}: {alert.labels[label]}\n"
+        alerthub.send(alert_msg, title=title, group="Alertmanager", url=url)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"status": "ok"}
